@@ -21,7 +21,7 @@ app.set('port', 5000);
 app.use('/static', express.static(__dirname + '/static'));
 
 app.get('/', (req, res) => {
-	res.sendFile(path.join(__dirname, 'index.html'));
+	res.sendFile(path.join(__dirname + '/static/', 'index.html'));
 });
 
 server.listen(5000, () => {

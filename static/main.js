@@ -1,527 +1,216 @@
-const gameDOM = document.querySelector('.game');
-const ctx = gameDOM.getContext('2d');
+const canvas = document.querySelector('canvas');
+const ctx = canvas.getContext('2d');
 
-class Game{
-	constructor(){
-		this.running = false;
-		this.gameLoop = 0;
-		this.frame = 0;
-		this.characters = [];
-		this.players = [];
-		this.visibleChars = [];
-	}
+ctx.font = "12px arial"
 
-	start(){
-		this.running = true;
-		let update = this.update.bind(this)
-		this.gameLoop = setInterval(update, 1000/60);
-	}
+const socket = io();
+let game = null;
 
-	stop(){
-		this.running = false;
-		clearInterval(this.gameLoop);
-	}
+let pickableWeapons = {};
 
-	update(){
-		this.visibleChars = [];
-		let aliveCharacters = [];
-		ctx.clearRect(0, 0, gameDOM.offsetWidth, gameDOM.offsetHeight);
-		this.characters.forEach(char => {
-			char.update();
-			if(char.checkVisibility()){
-				this.visibleChars.push(char);
-			}
-			if(char.alive){
-				aliveCharacters.push(char);
-			}
-		});
 
-		this.characters =  aliveCharacters;
+let allBullets = {};
+let lastPlayersState = {};
+let clientPlayer = {
+	moving:{	
+		up:false,
+		down:false,
+		left:false,
+		right:false,
+	},
+};
 
-		this.visibleChars.forEach(char => {
-			char.draw();
-		});
-		this.frame += 1;
-	}
-
-	addCharacter(char){
-		if(char.alreadyAdded){
-			console.log('Player already added')
-			return false;
-		}
-		char.alreadyAdded = true;
-		this.characters.push(char);
-	}
-}
-
-class Character{
-	constructor(x = 0, y = 0 ){
-		this.x = x;
-		this.y = y;
-		this.relativeX = 0;
-		this.relativeY = 0;
-		this.alreadyAdded = false;
-		this.mouseX = 0;
-		this.mouseY = 0;
-		this.r = 10;
-		this.damage = 10;
-		this.speed = 5;
-		this.visionR= 100;
-		this.curDeg = -Math.PI/1.2;
-		this.rotateLeft = false;
-		this.rotateRight = false;
-		this.rotatingSpeed = 0.1;
-		this.bullets = [];
-		this.alive = true;
-		this.health = 100;
-		this.circularSectorColor = 'rgba(255, 255, 0, 0.5)';
-		this.drawRangeOn = true;
-		this.meele = false;
-	}
-
-	rotatingHandler(){
-		this.correctDegreeToMousePosition();
-		this.rotate();
-		this.updateRotatingDirection();
-	}
-
-	correctDegreeToMousePosition(){
-		let correction = Math.abs(this.requestedDeg) - Math.abs(this.curDeg);
-		if(this.curDeg / this.requestedDeg > 0 && (correction > 0 && correction < this.rotatingSpeed || correction < 0 && correction > -0.1 )){
-			this.curDeg = this.requestedDeg
-		}
-	}
-
-	rotate(){
-		if(this.rotateRight){
-			this.curDeg += this.rotatingSpeed;
-		}
-		else if(this.rotateLeft){
-			this.curDeg -= this.rotatingSpeed;
-		}
-	}
-
-	update(){
-		if(this.alive){	
-			this.rotatingHandler();
-			this.updateBullets();
-			this.updateMovement();
-			this.checkHealthBarVisibility();
-		}
-
-	}
-
-	updateRotatingDirection(){
-		if(this.curDeg < this.requestedDeg - this.rotatingSpeed && (Math.PI - this.curDeg + this.requestedDeg)/2 < Math.PI  || this.curDeg - Math.PI >= this.requestedDeg){
-			if(this.curDeg > this.requestedDeg && this.curDeg > Math.PI){
-				this.curDeg = 0 - this.curDeg 
-			}
-			this.rotateRight = true;
-			this.rotateLeft = false;
-		}
-		else if(this.curDeg > this.requestedDeg + this.rotatingSpeed || this.curDeg + Math.PI < this.requestedDeg){
-			if(this.curDeg < -Math.PI && this.curDeg < this.requestedDeg){
-				this.curDeg += (2*Math.PI)
-			}
-			this.rotateLeft = true;
-			this.rotateRight = false;
-		}
-		else{
-			this.rotateLeft = false;
-			this.rotateRight = false;
-		}
-	}
-
-	updateBullets(){
-		this.bullets = this.bullets.filter(bullet => bullet.exist)
-
-		this.bullets.forEach(bullet => {
-			bullet.update();
-			bullet.draw();
-		});
-	}
-
-	updateMovement(){
-		this.updateRelativePosTo(player);
-		this.selfMovement();
-	}
-
-	selfMovement(){
-		if(this.movingLeft){
-			this.x -= this.speed;
-		}
-		if(this.movingRight){
-			this.x += this.speed;
-		}
-		if(this.movingUp){
-			this.y -= this.speed;
-		}
-		if(this.movingDown){
-			this.y += this.speed;
-		}
-	}
-
-	updateRelativePosTo(player){
-		if(this == player){
-			this.relativeX = gameDOM.width / 2;
-			this.relativeY = gameDOM.height / 2;
-		}
-		else{	
-			this.relativeX = this.x - player.x + gameDOM.width/2;
-			this.relativeY = this.y - player.y + gameDOM.height/2;
-		}
-	}
-
-	checkHealthBarVisibility(){
-		this.healthBarDisplayed = (this.healthBarExpire && this.healthBarExpire > game.frame);
-	}
-
-	checkVisibility(){
-		return this.relativeX - this.r - this.visionR < gameDOM.width && this.relativeX + this.r + this.visionR > 0 && this.relativeY + this.r + this.visionR > 0 && this.relativeY - this.relativeY - this.visionR < gameDOM.height;
-	}
-
-	draw(){
-		if(this.alive){
-			ctx.strokeStyle="0";
-			this.drawSelf();
-			this.drawRange();
-			this.drawGun();
-			this.drawHealthBar();
-		}
-		//console.log(Math.atan2(this.y-this.mouseY,this.x-this.mouseX))
-	}
-
-	drawSelf(){
-		if(this.selfColor){
-			ctx.strokeStyle = this.selfColor;
-		}
+	function drawGun(player){
+		let gunX = player.relativeX - Math.cos(player.curDeg)*20;
+		let gunY = player.relativeY - Math.sin(player.curDeg)*20;
 		ctx.beginPath();
-		ctx.arc(this.relativeX,this.relativeY,this.r,0,2*Math.PI);
-		ctx.stroke();
-		ctx.strokeStyle = "black";
-	}
-
-	drawRange(){
-		if(this.drawRangeOn){	
-			ctx.beginPath();
-			ctx.moveTo(this.relativeX, this.relativeY);
-			let line1x = this.relativeX - Math.cos(this.curDeg+(30*360/Math.PI))*this.visionR;
-			let line1y = this.relativeY - Math.sin(this.curDeg+(30*360/Math.PI))*this.visionR;
-			ctx.lineTo(line1x, line1y);
-			ctx.moveTo(this.relativeX, this.relativeY);
-			let line2x = this.relativeX - Math.cos(this.curDeg-(30*360/Math.PI))*this.visionR;
-			let line2y = this.relativeY - Math.sin(this.curDeg-(30*360/Math.PI))*this.visionR;
-			ctx.lineTo(line2x, line2y);
-			ctx.arc(this.relativeX,this.relativeY,this.visionR, this.curDeg - 3.98,Math.atan2(line2y - line1y, line2x - line1x) - 3.87);
-			ctx.fillStyle = this.circularSectorColor;
-			ctx.fill();
-			ctx.fillStyle = "black"
-		}
-	}
-
-	drawGun(){
-		let gunX = this.relativeX - Math.cos(this.curDeg)*20;
-		let gunY = this.relativeY - Math.sin(this.curDeg)*20;
-		ctx.beginPath();
-		ctx.moveTo(this.relativeX, this.relativeY);
+		ctx.moveTo(player.relativeX, player.relativeY);
 		ctx.lineTo(gunX, gunY);
 		ctx.stroke();
 	}
 
-	drawHealthBar(){
-		if(this.healthBarDisplayed){
-			let healthBarPosX = this.relativeX - 50;
-			let healthBarPosY = this.relativeY - 40;
+socket.on('newPlayersState', (data) => {
 
-			ctx.rect(healthBarPosX, healthBarPosY, 100, 10);
-			ctx.fillStyle = 'green';
-			ctx.fillRect(healthBarPosX, healthBarPosY,this.health,10);
-			ctx.stroke();
-			ctx.fillStyle = 'black';
-		}
-	}
+	lastPlayersState = data;
+	clientPlayer.x = data[socket.id].x;
+	clientPlayer.y = data[socket.id].y;
+	let playerCount = Object.keys(data).length;
+	ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-	movingUpStart(){
-		this.movingUp = true;
-	}
-
-	movingDownStart(){
-		this.movingDown = true;
-	}
-
-	movingLeftStart(){
-		this.movingLeft = true;
-	}
-
-	movingRightStart(){
-		this.movingRight= true;
-	}
-
-	movingUpStop(){
-		this.movingUp = false;
-	}
-
-	movingDownStop(){
-		this.movingDown = false;
-	}
-
-	movingLeftStop(){
-		this.movingLeft = false;
-	}
-
-	movingRightStop(){
-		this.movingRight= false;
-	}
-
-
-	shoot(){
-		this.bullets.push(new Bullet(this));
-	}
-
-	takeDamage(by){	//
-		this.health -= by.damage
-		if(this.health <= 0){
-			this.alive = false;
-			return;
-		}
-		this.healthBarDisplayed = true;
-		this.healthBarExpire = game.frame + 70;
-	}
-
-}
-
-
-class Player extends Character{
-	constructor(x, y){
-		super(x, y);
-		game.players.push(this);
-		this.circularSectorColor = 'rgba(0, 0, 255, 0.8)'
-	}
-
-	addControls(e){
-		gameDOM.addEventListener('mousemove', (e) => {
-			this.mouseHandler(e);
-		});
-
-		gameDOM.addEventListener('mousedown', (e) => {
-			if(!this.meele){
-				this.shoot();
+	drawAll(data);
+	for(let player in data){
+		drawScoreBoard(data[player], playerCount);
+		if(!data[player].alive){ //actually dead players
+			if( socket.id == player && (data[player].respawnDate - Date.now())/1000 >= 0){
+				ctx.font = '60px Arial'
+				ctx.fillText(`${Math.floor((data[player].respawnDate - Date.now())/1000)}`, canvas.width/2 - 10, 200)
+				deathScreenHandler();
+				ctx.font = '12px Arial'
 			}
-			else{
-				this.slice();
-			}
-		});
+			continue;
+		}
+		let loopedPlayer = data[player];
+		lastPlayersState[player].relativeX = loopedPlayer.x - data[socket.id].x + canvas.width/2;
+		lastPlayersState[player].relativeY = loopedPlayer.y - data[socket.id].y + canvas.height/2;
 
-		document.addEventListener('keydown', (e) => {
-			this.keydownHandler(e);
-		});
-
-		document.addEventListener('keyup', (e) => {
-			this.keyupHandler(e);
-		});
+		Player.draw(ctx, lastPlayersState[player].relativeX, lastPlayersState[player].relativeY, loopedPlayer.r, 'black');
+		drawGun(lastPlayersState[player]);
 	}
 
-	mouseHandler(e){
-		this.mouseX = e.offsetX;
-		this.mouseY = e.offsetY;
-		if(this.mouseX && this.mouseY){
-			this.requestedDeg = Math.atan2(this.relativeY-this.mouseY,this.relativeX-this.mouseX);
-		}
-	}
+});
 
-	keydownHandler(e){
-		switch(e.code){
-			case "KeyW":
-				this.movingUpStart();
-			break;
+drawScoreBoard = ((player, playerCount) => {
+	let iterator = 1;
 
-			case "KeyS":
-				this.movingDownStart();
-			break;
-
-			case "KeyA":
-				this.movingLeftStart();
-			break;
-
-			case "KeyD":
-				this.movingRightStart();
-			break;
-		}
-	}
-
-	keyupHandler(e){
-		switch(e.code){
-			case "KeyW":
-				this.movingUpStop();
-			break;
-
-			case "KeyS":
-				this.movingDownStop();
-			break;
-
-			case "KeyA":
-				this.movingLeftStop();
-			break;
-
-			case "KeyD":
-				this.movingRightStop();
-			break;
-		}
-	}
-}
-
-class Enemy extends Character{
-	constructor(x, y){
-		super(x, y);
-		this.circularSectorColor = 'rgba(255, 0, 0, 0.8)'
-	}
-
-	update(){
-		super.update();
-		this.findPlayer();
-		this.moveTowardPlayer();
-	}
-
-	moveTowardPlayer(){
-		if(player.x < this.x){
-			this.movingLeftStart();
-		}
-		else{
-			this.movingLeftStop();
-		}
-		if(player.x > this.x){
-			this.movingRightStart();
-		}
-		else{
-			this.movingRightStop();
-		}
-		if(player.y < this.y){
-			this.movingUpStart();
-		}
-		else{
-			this.movingUpStop();
-		}
-		if(player.y > this.y){
-			this.movingDownStart();
-		}
-		else{
-			this.movingDownStop();
-		}
-	}
-
-
-	findPlayer(){
-		this.requestedDeg = Math.atan2(this.y-player.y,this.x-player.x)	
-	}
-}
-
-class Bullet{
-	constructor(parent){
-		this.parent = parent;
-		this.exist = true;
-		this.deg = parent.curDeg;
-		this.speed = 20;
-		this.liveTime = Math.sqrt(gameDOM.width**2 + gameDOM.height**2)/this.speed;
-		this.frameEnd = game.frame +  this.liveTime;
-		this.distancePassed = 10;
-		this.startX = this.parent.x;
-		this.startY = this.parent.y;
-	}
-
-	update(){
-		if(game.frame > this.frameEnd){
-			this.exist = false
-		}
-		if(this.exist){
-			//bullet still exists
-			this.distancePassed += this.speed;
-			this.x = this.startX - Math.cos(this.deg)*this.distancePassed;
-			this.y = this.startY - Math.sin(this.deg)*this.distancePassed;
-			this.updateRelativePosTo(player);
-			this.checkForAnyHit();
-		}
-	}
-
-	updateRelativePosTo(player){
-		this.relativeX = this.x - player.x + gameDOM.width/2;
-		this.relativeY = this.y - player.y + gameDOM.height/2;
-	}
-
-	checkForAnyHit(){
-		game.characters.forEach(char => {
-			if((this.x - char.x)**2 + (this.y - char.y)**2 < char.r**2 * 2 && this.exist){	// hitbox * 2.0
-				this.handleHit(char);
-				return true;
-			}
-		});
-	}
-
-	handleHit(object){
-		//object.dosomething
-		console.log('woo');
-		this.exist = false;
-		object.takeDamage(this.parent);
-	}
-
-	draw(){
-		if(this.exist){
-			//bullet still exists
-
+	return (player, playerCount) =>{
+		ctx.fillText(`${player.id.slice(0,4)}: ${player.kills}`, canvas.width - 50, 20*iterator);
+		if(socket.id == player.id){
 			ctx.beginPath();
-			ctx.arc(this.relativeX,this.relativeY,1,0,2*Math.PI);
+			ctx.moveTo(canvas.width-50, 20*iterator + 3);
+			ctx.lineTo(canvas.width-5, 20*iterator + 3)
 			ctx.stroke();
 		}
-	}
-}
-
-class Zombie extends Enemy{
-	constructor(x,y,speed){
-		super();
-		this.selfColor = "green";
-		this.circularSectorColor = "rgba(0,95,0,0.5)";
-		this.speed = speed;
-		this.x = x;
-		this.y = y;
-		this.drawRangeOn = false;
-	}
-
-	update(){
-		super.update();
-		this.moveTowardPlayer();
-		this.findPlayer();
-	}
-	moveTowardPlayer(){
-		let desiredX = this.x - Math.cos(this.curDeg)*this.speed;
-		let desiredY = this.y - Math.sin(this.curDeg)*this.speed;
-		for(let i = 0; i < game.characters.length; i+= 1){	//non blocking
-			let zombie = game.characters[i];
-			if((zombie.x - desiredX)**2 + (zombie.y - desiredY)**2 < zombie.r**2  && zombie != this){
-				return
-			}
+		iterator += 1;
+		if(iterator > playerCount ){
+			iterator = 1;
 		}
-			this.x = desiredX;
-			this.y = desiredY;
+	}
+
+	return show;
+
+})();
+
+function drawBullets(bullets){
+	for(let bullet in bullets){
+		let loopedBullet = bullets[bullet];
+		drawBullet(loopedBullet.x, loopedBullet.y, 1);
 	}
 }
 
-
-const game = new Game;
-let player = new Player(0, 0);
-new Character;
-game.addCharacter(player);
-player.addControls();
-game.start();
-
-let testChar = new Character(20, 50)
-game.addCharacter(testChar);
-
-
-for(let i = 0; i < 400; i+= 1){	
-	setTimeout(() => {
-		game.addCharacter(new Zombie(Math.random()*1000, Math.random()*1000, Math.random()*2+1));
-		//game.addCharacter(new Zombie(0,0,1));
-	}, i*5)
+function drawBullet(x,y,r){
+		ctx.beginPath();
+		ctx.arc(x-clientPlayer.x + canvas.width/2,y - clientPlayer.y + canvas.height/2,r,0,2*Math.PI);
+		ctx.stroke();
 }
 
-//let enemyTest = new Enemy(213, 7)
-//game.addCharacter(enemyTest);
+function drawWeapons(weapons){
+	for(let weapon in weapons){
+		drawWeapon(pickableWeapons[weapon].x, pickableWeapons[weapon].y, pickableWeapons[weapon].name)
+	}
+}
+
+function drawWeapon(x,y, name){	
+	ctx.beginPath();
+	ctx.arc(x-clientPlayer.x + canvas.width/2,y - clientPlayer.y + canvas.height/2,10,0,2*Math.PI);
+	ctx.fill();
+	let nameLength = name.length;
+	ctx.fillText(name, x-clientPlayer.x + canvas.width/2 - nameLength*3.2, y - clientPlayer.y + canvas.height/2 + 20);
+}
+
+function writeAmmoState(player){
+	ctx.fillText(`Ammo left: ${player.equippedWeapon.bulletsLeft.toString()}`, canvas.width - 75, canvas.height - 5);
+}
+
+function drawAll(data){
+	drawWeapons(pickableWeapons);
+	drawBullets(allBullets);
+	writeAmmoState(data[socket.id]);
+	drawEquipment(data[socket.id]);
+}
+
+function drawEquipment(player){
+	drawEqWeapons(player.weapons)
+}
+
+function drawEqWeapons(weapons){ //todo
+	for(let weapon in weapons){
+	//		ctx.fillRect(100,0, 50, 20);
+	}
+}
+
+socket.on('bulletsState', (bullets) => {
+	allBullets = bullets;
+});
+
+socket.on('weaponsPosition', (weapons) => {
+	pickableWeapons = weapons;
+})
+
+
+socket.on('playerDied', (id, respawnTime) =>{
+	if(socket.id === id){
+		clientPlayer.respawnTime = Date.now() + respawnTime;
+	}
+});
+
+function deathScreenHandler(){
+	ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+	ctx.fillRect(0,0, canvas.width, canvas.height);
+	ctx.fillText("You Died, Wait for Respawn", 50, 50);
+}
+
+function getMovementFromKey(key){
+	switch(key){
+		case 'w':
+			return clientPlayer.moving.up;
+		break;
+		case 's':
+			return clientPlayer.moving.down;
+		break;
+		case 'a':
+			return clientPlayer.moving.left;
+		break;
+		case 'd':
+			return clientPlayer.moving.right;
+		break;
+	}
+}
+
+function keyHandler(key, keyDown){
+	switch(key){
+		case 'w':
+			clientPlayer.moving.up = keyDown;
+		break;
+		case 's':
+			clientPlayer.moving.down = keyDown;
+		break;
+		case 'a':
+			clientPlayer.moving.left = keyDown;
+		break;
+		case 'd':
+			clientPlayer.moving.right = keyDown;
+		break;
+	}
+		socket.emit('movement', clientPlayer.moving);
+}
+
+
+function mouseMoveHandler(e){
+	clientPlayer.mouseX = e.offsetX;
+	clientPlayer.mouseY = e.offsetY;
+	if(clientPlayer.mouseX && clientPlayer.mouseY){
+		clientPlayer.requestedDeg = Math.atan2(canvas.height/2-clientPlayer.mouseY,canvas.width/2-clientPlayer.mouseX);
+	}
+	socket.emit('newRequestedDeg', clientPlayer.requestedDeg)
+}
+
+canvas.addEventListener('mousemove', (e) => {
+	mouseMoveHandler(e);
+});
+
+document.addEventListener('keydown', (e) => {
+	if(getMovementFromKey(e.key.toLowerCase()) == false)
+	keyHandler(e.key.toLowerCase(), true);
+});
+
+document.addEventListener('keyup', (e) => {
+	keyHandler(e.key.toLowerCase(), false);
+});
+
+canvas.addEventListener('mousedown', (e) => {
+	socket.emit("mouseDown");
+});
+
+canvas.addEventListener('mouseup', (e) => {
+	socket.emit('mouseUp')
+});

@@ -4,5 +4,9 @@
   },
   "name": "",
   "version": "",
-  "description": "Node.js Multiplayer version"
+  "description": "Node.js Multiplayer version",
+  "dependencies": {
+    "express": "^4.16.4",
+    "socketio": "^1.0.0"
+  }
 }
