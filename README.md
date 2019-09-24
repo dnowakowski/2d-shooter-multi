@@ -1,3 +1,1 @@
-Multiplayer version of https://github.com/Nairorox/2d-shooter
-
-Working demo on: https://dnowakowski.pl
+Multiplayer mini 2d shooter game of https://github.com/Nairorox/2d-shooter
